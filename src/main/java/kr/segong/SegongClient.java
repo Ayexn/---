@@ -82,6 +82,7 @@ public class SegongClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         load();
+        seedDefaults();
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.segong.toggle", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, "category.segong"));
         gradeKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.segong.grade", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_G, "category.segong"));
 
@@ -120,7 +121,7 @@ public class SegongClient implements ClientModInitializer {
                         .then(ClientCommandManager.literal("toggle").executes(c -> { doToggle(); return Command.SINGLE_SUCCESS; }))
                         .then(ClientCommandManager.literal("grade").executes(c -> { doGrade(); return Command.SINGLE_SUCCESS; }))
                         .then(ClientCommandManager.literal("forget").executes(c -> {
-                            learned.clear(); gradeMode = 0; save();
+                            learned.clear(); gradeMode = 0; seedDefaults(); save();
                             c.getSource().sendFeedback(Text.literal("[세공] 학습한 등급 표시와 수동 등급을 모두 지웠습니다"));
                             return Command.SINGLE_SUCCESS;
                         }))
@@ -240,17 +241,18 @@ public class SegongClient implements ClientModInitializer {
         return g;
     }
 
-    /** 위쪽 3줄에서 특수문자(리소스팩 글꼴 문자)만 모은 값. 등급 표시가 이런 문자일 때 구분용. */
+    /** 첫 줄(등급 그림 글자 + 이름)에서 영문/숫자/한글이 아닌 글자만 모은 값. 등급 표시 구분용. */
     private static String signature(List<String> lines) {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < Math.min(3, lines.size()); i++) {
-            lines.get(i).codePoints().forEach(cp -> {
-                if (Character.getType(cp) == Character.PRIVATE_USE) {
-                    if (sb.length() > 0) sb.append('-');
-                    sb.append(Integer.toHexString(cp));
-                }
-            });
-        }
+        if (lines.isEmpty()) return "";
+        lines.get(0).codePoints().forEach(cp -> {
+            boolean ascii = cp < 128;
+            boolean hangul = (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0x1100 && cp <= 0x11FF) || (cp >= 0x3130 && cp <= 0x318F);
+            if (!ascii && !hangul && !Character.isWhitespace(cp) && cp != 0xA0) {
+                if (sb.length() > 0) sb.append('-');
+                sb.append(Integer.toHexString(cp));
+            }
+        });
         return sb.toString();
     }
 
@@ -318,7 +320,7 @@ public class SegongClient implements ClientModInitializer {
                 out.add("§f현재 " + st[0] + " / " + st[1] + " / " + st[2] + " = " + (st[0] + st[1] + st[2]));
                 if (lim == 0) {
                     out.add("§c등급을 못 읽음 → G 키로 등급 선택");
-                    out.add("§7(한 번 고르면 같은 등급 표시는 기억합니다)");
+                    out.add("§7(한 번 고르면 같은 등급 표시는 기억합니다" + (g.sig.isEmpty() ? "" : " · 표시 " + g.sig) + ")");
                 } else {
                     Calc.Result r = Calc.best(st[0], st[1], st[2], lim, stock);
                     out.add("§7한도 " + lim + " (" + how + ")");
@@ -360,6 +362,11 @@ public class SegongClient implements ClientModInitializer {
     }
 
     // ---------------------------------------------------------------- 설정 저장
+
+    /** 확인된 등급 그림 글자: a002 = COMMON(200). 나머지는 G 키로 한 번 고르면 기억한다. */
+    private static void seedDefaults() {
+        learned.putIfAbsent("a002", 200);
+    }
 
     private static Path cfgPath() {
         return FabricLoader.getInstance().getConfigDir().resolve("segong.properties");
