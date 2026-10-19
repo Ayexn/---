@@ -338,12 +338,12 @@ public class SegongClient implements ClientModInitializer {
 
     // ---------------------------------------------------------------- 점검용 글자 처리
 
-    /** 영문/숫자/한글 외의 글자는 \u{코드} 로 보여준다 (특수문자 확인용). */
+    /** 영문/숫자/한글 외의 글자는 U+코드 형태로 보여준다 (특수문자 확인용). */
     private static String esc(String s) {
         StringBuilder b = new StringBuilder();
         s.codePoints().forEach(cp -> {
             if ((cp >= 32 && cp < 127) || (cp >= 0xAC00 && cp <= 0xD7A3)) b.appendCodePoint(cp);
-            else b.append("\\u{").append(Integer.toHexString(cp)).append('}');
+            else b.append("<U+").append(Integer.toHexString(cp)).append('>');
         });
         return b.toString();
     }
