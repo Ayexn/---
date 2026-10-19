@@ -11,10 +11,14 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.tooltip.TooltipType;
+import net.minecraft.screen.slot.Slot;
 import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
 
@@ -44,6 +48,13 @@ public class SegongClient implements ClientModInitializer {
     private static volatile long lastSeen;
     private static volatile List<String> lastLines = new ArrayList<>();
 
+    // 세공 모듈 칸에 들어 있는 보석 (마우스를 안 올려도 읽음)
+    private static boolean scanning = false;
+    private static int[] modStats;
+    private static int modGradeLimit;
+    private static List<String> modLines = new ArrayList<>();
+    private static long modScanAt;
+
     @Override
     public void onInitializeClient() {
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.segong.toggle", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, "category.segong"));
@@ -52,6 +63,7 @@ public class SegongClient implements ClientModInitializer {
         // 1) 툴팁 읽기 (타입을 적지 않아 버전 차이에 덜 민감하게)
         ItemTooltipCallback.EVENT.register((stack, context, type, lines) -> {
             List<String> plain = new ArrayList<>();
+            if (scanning) return;   // 내가 직접 읽는 중에는 '마우스 올림'으로 치지 않음
             for (Text t : lines) plain.add(t.getString());
             int[] st = GemParser.parseStats(plain);
             if (st == null) return;
@@ -74,8 +86,12 @@ public class SegongClient implements ClientModInitializer {
         });
 
         // 3) 화면 그리기: 인벤토리 같은 화면이 열려 있을 때 / 평소 화면 둘 다
-        ScreenEvents.AFTER_INIT.register((client, screen, w, h) ->
-                ScreenEvents.afterRender(screen).register((s, ctx, mx, my, delta) -> draw(client, ctx)));
+        ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
+            lastStats = null;       // 새 화면을 열면 이전 기록은 지움
+            modStats = null;
+            modScanAt = 0;
+            ScreenEvents.afterRender(screen).register((s, ctx, mx, my, delta) -> draw(client, ctx));
+        });
         HudRenderCallback.EVENT.register((ctx, tick) -> {
             MinecraftClient c = MinecraftClient.getInstance();
             if (c.currentScreen == null) draw(c, ctx);
@@ -92,6 +108,22 @@ public class SegongClient implements ClientModInitializer {
                         .then(ClientCommandManager.literal("dump").executes(c -> {
                             c.getSource().sendFeedback(Text.literal("[세공] 마지막 보석 툴팁(" + lastLines.size() + "줄)"));
                             for (String l : lastLines) c.getSource().sendFeedback(Text.literal("  " + l));
+                            return Command.SINGLE_SUCCESS;
+                        }))
+                        .then(ClientCommandManager.literal("slots").executes(c -> {
+                            // 지금 열린 화면에서 '내 인벤토리가 아닌' 칸의 아이템을 보여줌 (모듈 칸 확인용)
+                            MinecraftClient mc = MinecraftClient.getInstance();
+                            if (!(mc.currentScreen instanceof HandledScreen<?> hs)) {
+                                c.getSource().sendFeedback(Text.literal("[세공] 세공 화면을 연 상태에서 입력하세요"));
+                                return Command.SINGLE_SUCCESS;
+                            }
+                            for (Slot sl : hs.getScreenHandler().slots) {
+                                if (sl.inventory == mc.player.getInventory()) continue;
+                                ItemStack st = sl.getStack();
+                                if (st.isEmpty()) continue;
+                                boolean gem = GemParser.parseStats(tooltipOf(mc, st)) != null;
+                                c.getSource().sendFeedback(Text.literal("  칸" + sl.id + ": " + st.getName().getString() + " x" + st.getCount() + (gem ? "  ← 보석" : "")));
+                            }
                             return Command.SINGLE_SUCCESS;
                         }))
                         .then(ClientCommandManager.literal("items").executes(c -> {
@@ -122,12 +154,59 @@ public class SegongClient implements ClientModInitializer {
         return n;
     }
 
+    /** 아이템의 툴팁 글자를 마우스 없이 직접 만들어서 읽는다. */
+    private static List<String> tooltipOf(MinecraftClient client, ItemStack stack) {
+        List<String> out = new ArrayList<>();
+        scanning = true;
+        try {
+            for (Text t : stack.getTooltip(Item.TooltipContext.DEFAULT, client.player, TooltipType.BASIC)) out.add(t.getString());
+        } catch (Throwable e) {
+            // 읽기 실패하면 빈 목록
+        } finally {
+            scanning = false;
+        }
+        return out;
+    }
+
+    /** 열린 화면의 '내 인벤토리가 아닌' 칸 중 보석(순도/광도/강도가 있는 것)을 찾는다. 0.25초마다 한 번만. */
+    private static void scanModule(MinecraftClient client) {
+        long now = System.currentTimeMillis();
+        if (now - modScanAt < 250) return;
+        modScanAt = now;
+        modStats = null;
+        if (!(client.currentScreen instanceof HandledScreen<?> hs)) return;
+        for (Slot sl : hs.getScreenHandler().slots) {
+            if (sl.inventory == client.player.getInventory()) continue;
+            ItemStack st = sl.getStack();
+            if (st.isEmpty()) continue;
+            List<String> lines = tooltipOf(client, st);
+            int[] stats = GemParser.parseStats(lines);
+            if (stats != null) {
+                modStats = stats;
+                modGradeLimit = GemParser.parseGradeLimit(lines);
+                modLines = lines;
+                return;
+            }
+        }
+    }
+
     private static void draw(MinecraftClient client, DrawContext ctx) {
         if (!enabled || client.player == null) return;
-        int[] st = lastStats;
-        if (st == null || System.currentTimeMillis() - lastSeen > SHOW_MS) return;
+        boolean screenOpen = client.currentScreen != null;
+        int[] st = null;
+        int gradeFound = 0;
+        if (screenOpen) {
+            scanModule(client);
+            if (modStats != null) { st = modStats; gradeFound = modGradeLimit; }
+        }
+        if (st == null) {
+            // 모듈 칸에서 못 찾으면: 마우스를 올렸던 마지막 보석 (화면이 열려 있는 동안 유지)
+            boolean recent = System.currentTimeMillis() - lastSeen <= SHOW_MS;
+            if (lastStats != null && (screenOpen || recent)) { st = lastStats; gradeFound = lastGradeLimit; }
+        }
+        if (st == null) return;
 
-        int lim = gradeMode == 0 ? lastGradeLimit : LIMITS[gradeMode];
+        int lim = gradeMode == 0 ? gradeFound : LIMITS[gradeMode];
         long[] stock = countOrbs(client);
         List<String> out = new ArrayList<>();
         out.add("§e세공 도우미 §7(V 끄기 / G 등급)");
