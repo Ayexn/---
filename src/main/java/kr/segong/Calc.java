@@ -6,6 +6,7 @@ public final class Calc {
         public int a, b, c;   // 바이올렛(순도) / 오팔(광도) / 아다만티움(강도) 사용 개수
         public int sum;       // 사용 후 합
         public int n;         // 총 사용 개수
+        public int missing;   // 보유가 모자라서 못 채운 광채 개수 (보유가 넉넉했다면 더 쓸 수 있었던 개수)
     }
 
     private Calc() {}
@@ -58,6 +59,11 @@ public final class Calc {
         if (best == null) {
             best = new Result();
             best.sum = cs;
+        }
+        if (anyFinite) {
+            // 보유가 무제한이라면 도달할 수 있는 합과 비교해서, 모자란 광채 개수를 구한다
+            Result ideal = best(p, l, s, lim, new long[]{-1, -1, -1});
+            best.missing = Math.max(0, (ideal.sum - best.sum) / 10);
         }
         return best;
     }

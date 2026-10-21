@@ -1,5 +1,6 @@
 {
   "key.segong.toggle": "Craft helper on/off",
   "key.segong.grade": "Change grade (auto/Common/Normal/Rare)",
-  "category.segong": "Craft helper"
+  "category.segong": "Craft helper",
+  "key.segong.settings": "Open craft helper settings"
 }

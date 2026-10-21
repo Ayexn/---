@@ -4,16 +4,23 @@
   "version": "${version}",
   "name": "세공 도우미",
   "description": "보석 정보(순도/광도/강도)와 인벤토리의 광채 개수를 읽어 쓸 광채 개수를 화면에 보여줍니다. 표시용이며 자동 클릭이나 서버 통신은 하지 않습니다.",
-  "authors": ["세공 도우미"],
+  "authors": [
+    "세공 도우미"
+  ],
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
-    "client": ["kr.segong.SegongClient"]
+    "client": [
+      "kr.segong.SegongClient"
+    ]
   },
   "depends": {
     "fabricloader": ">=0.16.0",
     "minecraft": "~1.21.4",
     "java": ">=21",
     "fabric-api": "*"
-  }
+  },
+  "mixins": [
+    "segong.mixins.json"
+  ]
 }
